@@ -2,6 +2,7 @@ local nuklear = require 'nuklear'
 local overview = require 'overview'
 
 local sh_mbrot;
+local sh_swap;
 local cv_checkers;
 local cv_mbrot;
 local num_shadertime = 0;
@@ -9,16 +10,19 @@ local iter_factor = 10;
 
 local move_x = 0;
 local move_y = 0;
+local reset = false;
+-- c values for julia/mandelbrot mutations
+local cx = 0;
+local cy = 0;
+
 local zoom_factor = 1;
 local pause = {value = false}
-local reset = false;
 local colorPicker = {value = '#FF0000'}
 local r = 0;
 local g = 0;
 local b = 0;
 local debug = {value = false}
-
-local dt = 0.01;
+local timescale = 1.0;
 
 local window_w;
 local window_h;
@@ -61,6 +65,8 @@ function love.load()
     window_w = 800;
     window_h = 600;
     short_dimension = 600;
+    sh_mbrot = love.graphics.newShader("mbrot.glsl");
+    sh_swap = love.graphics.newShader("julia.glsl");
     ui1 = nuklear.newUI()
 end
 
@@ -74,10 +80,10 @@ function love.resize(w, h)
     if (w < h) then short_dimension = w else short_dimension = h end
 end
 
-function love.update()
-    local cx, cy;
-    cx = love.mouse.getX() / window_w;
-    cy = love.mouse.getY() / window_h;
+function love.update(dt)
+    local cursorx, cursory;
+    --cursorx = love.mouse.getX() / window_w;
+    --cursory = love.mouse.getY() / window_h;
     local mspd = 15*dt;
     if love.keyboard.isDown('up') then
         move_y = move_y - mspd / math.exp(zoom_factor);
@@ -92,11 +98,11 @@ function love.update()
     if love.keyboard.isDown('right') then
         move_x = move_x + mspd / math.exp(zoom_factor);
     end
-    if love.keyboard.isDown('1') then
+    if love.keyboard.isDown('=') then
         zoom_factor = zoom_factor + dt;
         overview.zoomfactor = overview.zoomfactor + dt;
     end
-    if love.keyboard.isDown('2') then
+    if love.keyboard.isDown('-') then
         zoom_factor = zoom_factor - dt;
         overview.zoomfactor = overview.zoomfactor - dt;
     end
@@ -114,7 +120,7 @@ function love.update()
         b = tonumber(string.sub(colorPicker.value, 6, 7), 16);
     end
     if sh_mbrot ~= nil then
-        sh_mbrot:send('t', num_shadertime);
+        --sh_mbrot:send('t', num_shadertime);
         sh_mbrot:send('movexy', {move_x, move_y});
         sh_mbrot:send('shortside', short_dimension);
         sh_mbrot:send('zoomfactor', zoom_factor);
@@ -122,35 +128,43 @@ function love.update()
         sh_mbrot:send('r', r);
         sh_mbrot:send('g', g);
         sh_mbrot:send('b', b);
-    end
-
-    if reset then
-        num_shadertime = 0;
+        if (sh_mbrot:hasUniform('c')) then
+            sh_mbrot:send('c', {cx, cy});
+        end
     end
 
     if not pause.value then
-        num_shadertime = num_shadertime + dt;
+        num_shadertime = num_shadertime + (dt * timescale);
     end
     
 
     ui1:frameBegin()
 
         overview:drawUI(ui1);
+        reset = overview.reset;
+        if reset then
+            num_shadertime = 0;
+            move_x = 0;
+            move_y = 0;
+            overview.zoomfactor = 1;
+        end
+        
         iter_factor = overview.iterations;
         zoom_factor = overview.zoomfactor;
+        
+        cx = overview.cx + math.sin(num_shadertime / 10) * overview.osc_cx;
+        cy = overview.cy + math.sin(num_shadertime / 10) * overview.osc_cy;
         pause = overview.pause;
-        reset = overview.reset;
         colorPicker = overview.colorPicker;
-        dt = overview.speed;
+        timescale = overview.speed;
         debug = overview.debug;
+        if (overview.swap_button) then
+            local temp = sh_mbrot;
+            sh_mbrot = sh_swap;
+            sh_swap = temp;
+        end
             
     ui1:frameEnd()
-end
-
-function mbrot_make()
-    if (sh_mbrot == nil) then
-        sh_mbrot = love.graphics.newShader('mbrot.glsl');
-    end
 end
 
 function checkers()
@@ -196,7 +210,6 @@ function love.draw()
     if cv_checkers == nil then
         checkers();
     end
-    mbrot_make();
     mbrot();
     love.graphics.draw(cv_mbrot);
     if debug.value then
@@ -204,6 +217,7 @@ function love.draw()
         love.graphics.print("(" .. move_x .. ", " .. move_y .. ")", 0, 16);
         love.graphics.print("pause: " .. tostring(pause.value), 0, 32);
         love.graphics.print("r: " .. r .. " g: " .. g .. " b: " .. b, 0, 48);
+        love.graphics.print("c: (" .. cx .. ", " .. cy ..")", 0, 64);
     end
     ui1:draw();
 end
